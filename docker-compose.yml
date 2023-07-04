@@ -1,0 +1,111 @@
+version: '3'
+services:
+  nginx:
+    container_name: my-nginx
+    image: nginx:1.13
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    depends_on:
+      - app
+
+  app:
+    restart: always
+    container_name: app-my
+    build: ./app
+    ports:
+      - "8080:8080"
+    working_dir: /app
+    expose:
+      - "8080"
+    command: mvn clean install spring-boot:run
+    environment:
+      - SPRING_DATA_MONGODB_HOST=mongodb-my
+      - SPRING_DATA_MONGODB_PORT=27017
+      - SPRING_DATA_MONGODB_DATABASE=mongo
+      - SPRING_DATA_MONGODB_PASSWORD=my-password
+      - SPRING_DATA_MONGODB_USERNAME=my-username
+      - SPRING_DATA_MONGODB_AUTHENTICATION-DATABASE=admin
+      - SPRING_ELASTICSEARCH_URIS=http://127.0.0.1:9200
+
+  influxdb:
+    image: influxdb:1.8
+    platform: linux/x86_64
+    container_name: influxdb
+    restart: always
+    environment:
+      - INFLUXDB_DB=influx
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=admin
+      - INFLUXDB_RETENTION_POLICIES=influx:30d,default:7d
+      - TZ=Europe/Prague
+    ports:
+      - '8086:8086'
+
+  grafana:
+    image: grafana/grafana:9.1.5
+    container_name: grafana-server
+    restart: always
+    depends_on:
+      - influxdb
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_INSTALL_PLUGINS=
+    links:
+      - influxdb
+    ports:
+      - '3000:3000'
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+      - ./grafana/dashboards/:/var/lib/grafana/dashboards/
+
+  telegraf:
+    image: telegraf
+    container_name: telegraf
+    restart: always
+    volumes:
+      - ./telegraf.conf:/etc/telegraf/telegraf.conf:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - influxdb
+    links:
+      - influxdb
+    ports:
+      - '8125:8125'
+    environment:
+      - TZ=Europe/Prague
+    entrypoint: /bin/bash -c "chmod 666 /var/run/docker.sock && /entrypoint.sh telegraf"
+
+  mongodb:
+    container_name: mongodb-my
+    image: mongo:latest
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=my-username
+      - MONGO_INITDB_ROOT_PASSWORD=my-password
+    volumes:
+      - ./data:/data/db
+    links:
+      - app
+
+  elasticsearch:
+      container_name: 'elasticsearch-my'
+      platform: linux/x86_64
+      image: elasticsearch:7.4.0
+      ports:
+        - "9200:9200"
+      environment:
+        - xpack.security.enabled=false
+        - discovery.type=single-node
+        - bootstrap.system_call_filter=false
+
+
+volumes:
+    grafana_data: { }
+    influxdb_data: { }
